@@ -60,11 +60,11 @@ class StatsCollector(object):
             processor(logentry)
 
     def process_startrequest(self, logentry):
-        self.active_jobs.update({logentry['reqid']: FrontendJobInfo(logentry['reqid'], int(logentry['time']))})
         """
         Create record about new Frontend Job
         :param logentry: dict
         """
+        self.active_jobs.update({logentry['reqid']: FrontendJobInfo(logentry['reqid'], logentry['time'])})
 
     def process_startmerge(self, logentry):
         """
@@ -73,7 +73,7 @@ class StatsCollector(object):
         """
         job = self.get_active_job(logentry['reqid'])
         if job:
-            job.start_merge_time = int(logentry['time'])
+            job.start_merge_time = logentry['time']
 
     def process_startsendresult(self, logentry):
         """
@@ -82,7 +82,7 @@ class StatsCollector(object):
         """
         job = self.get_active_job(logentry['reqid'])
         if job:
-            job.start_send_result_time = int(logentry['time'])
+            job.start_send_result_time = logentry['time']
 
     def process_finishrequest(self, logentry):
         """
@@ -181,8 +181,8 @@ class StatsCollector(object):
         output.append(u"Обращения и ошибки по бекендам:")
 
         backend_info = BackendInfo.get_all()
-        for backend_group in sorted(backend_info):
-            output.append(u"ГР {0!s}".format(backend_group))
+        for backend_group in sorted(backend_info, key=int):
+            output.append(u"ГР {0!s}:".format(backend_group))
             for backend in sorted(backend_info[backend_group]):
                 output.append(u"\t{0!s}".format(backend))
                 output.append(u"\t\tОбращения: {0!s}".format(backend_info[backend_group][backend].connects))
