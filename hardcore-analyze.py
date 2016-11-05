@@ -7,8 +7,8 @@ import heapq
 import io
 import logging
 
-#logentry_re = re.compile(r'(?P<time>\d+)\t(?P<reqid>\d+)\t(?P<type>\w+)(?:\t(?P<groupid>\d+)(?:\t(?P<desc>(.*)))?)?')
-#hostname_re = re.compile(r'//(?P<name>[\w\d\-.:]*)/')
+# logentry_re = re.compile(r'(?P<time>\d+)\t(?P<reqid>\d+)\t(?P<type>\w+)(?:\t(?P<groupid>\d+)(?:\t(?P<desc>(.*)))?)?')
+# hostname_re = re.compile(r'//(?P<name>[\w\d\-.:]*)/')
 
 
 class StatsCollector(object):
@@ -136,7 +136,7 @@ class StatsCollector(object):
 
     def process_backendok(self, logentry):
         """
-        Count success request - this marks backend healthy
+        Count success request
         :param logentry: dict
         """
         job = self.get_active_job(logentry['reqid'])
@@ -166,12 +166,12 @@ class StatsCollector(object):
     def results(self):
         """
         Output gathered statistics
-        :return: array
+        :return: list
         """
         output = []
 
-        #na = numpy.array(self.full_request_time)
-        #output.append(u"95-й перцентиль времени работы: {0!s}\n".format(numpy.percentile(na, 95)))
+        # na = numpy.array(self.full_request_time)
+        # output.append(u"95-й перцентиль времени работы: {0!s}\n".format(numpy.percentile(na, 95)))
 
         output.append(u"95-й перцентиль времени работы: {0!s}\n".format(sorted(self.full_request_time)[int(round(len(self.full_request_time) * 0.95)) - 1]))
 
