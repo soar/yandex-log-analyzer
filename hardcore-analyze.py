@@ -102,8 +102,9 @@ class StatsCollector(object):
             send_answer_time = job.finish_time - job.start_send_result_time
             self.send_answer_time.update({logentry['reqid']: send_answer_time})
 
-            for backend_group in job.backend_groups:
-                if not BackendInfo.get_last(backend_group).was_success:
+            for backend_group, backends in job.backends.iteritems():
+                if backend_group not in job.success_groups:
+                    logging.debug("For query {0!s} found group without successful requests: {1!s}".format(job.id, backend_group))
                     self.jobs_without_full_set += 1
                     break
 
@@ -115,44 +116,52 @@ class StatsCollector(object):
          Also add backend group to current job relations
         :param logentry: dict
         """
-        BackendInfo.get(logentry['groupid'], logentry['desc'].split('/')[2]).count_connect()
-
         job = self.get_active_job(logentry['reqid'])
         if job:
-            job.add_backend_group(logentry['groupid'])
+            backend_info = BackendInfo.get(logentry['groupid'], logentry['desc'].split('/')[2])
+            backend_info.count_connect()
+            job.add_backend(logentry['groupid'], backend_info)
 
     def process_backendrequest(self, logentry):
         """
         Only count request
         :param logentry: dict
         """
-        backend_info = BackendInfo.get_last(logentry['groupid'])
-        if backend_info:
-            backend_info.count_request()
-        else:
-            logging.debug("There is no information about last accessed backend in group {0!s}".format(logentry['groupid']))
+        job = self.get_active_job(logentry['reqid'])
+        if job:
+            backend_info = job.get_last_backend(logentry['groupid'])
+            if backend_info:
+                backend_info.count_request()
+            else:
+                logging.debug("There is no information about last accessed backend in group {0!s}".format(logentry['groupid']))
 
     def process_backendok(self, logentry):
         """
         Count success request - this marks backend healthy
         :param logentry: dict
         """
-        backend_info = BackendInfo.get_last(logentry['groupid'])
-        if backend_info:
-            backend_info.count_success()
-        else:
-            logging.debug("There is no information about last accessed backend in group {0!s}".format(logentry['groupid']))
+        job = self.get_active_job(logentry['reqid'])
+        if job:
+            job.success_groups.append(logentry['groupid'])
+
+            backend_info = job.get_last_backend(logentry['groupid'])
+            if backend_info:
+                backend_info.count_success()
+            else:
+                logging.debug("There is no information about last accessed backend in group {0!s}".format(logentry['groupid']))
 
     def process_backenderror(self, logentry):
         """
         Save error got from backend
         :param logentry: dict
         """
-        backend_info = BackendInfo.get_last(logentry['groupid'])
-        if backend_info:
-            backend_info.count_error(logentry['desc'])
-        else:
-            logging.debug("There is no information about last accessed backend in group {0!s}".format(logentry['groupid']))
+        job = self.get_active_job(logentry['reqid'])
+        if job:
+            backend_info = job.get_last_backend(logentry['groupid'])
+            if backend_info:
+                backend_info.count_error(logentry['desc'])
+            else:
+                logging.debug("There is no information about last accessed backend in group {0!s}".format(logentry['groupid']))
 
     @property
     def results(self):
@@ -191,7 +200,6 @@ class StatsCollector(object):
 class BackendInfo(object):
 
     __backends = collections.defaultdict(dict)
-    __last_access = collections.defaultdict(None)
 
     @classmethod
     def get(cls, group, name):
@@ -205,15 +213,6 @@ class BackendInfo(object):
             return cls.__backends[group][name]
         else:
             return BackendInfo(group, name)
-
-    @classmethod
-    def get_last(cls, group):
-        """
-        Get last backend was accessed in group
-        :param group: int
-        :return: BackendInfo
-        """
-        return cls.__last_access[group]
 
     @classmethod
     def get_all(cls):
@@ -237,50 +236,38 @@ class BackendInfo(object):
         self.successful = 0
         self.errors = collections.defaultdict(int)
 
-        self.request_pending = False
-        self.healthy = True
-
         BackendInfo.__backends[group].update({name: self})
 
     def count_connect(self):
-        """
-        On counting connection - reset health status
-        """
         self.connects += 1
-        self.request_pending = True
-        self.healthy = True
-        BackendInfo.__last_access.update({self.group: self})
 
     def count_request(self):
         self.requests += 1
 
     def count_success(self):
-        """
-        On success communication - mark backend as healthy
-        """
-        self.request_pending = False
-        self.healthy = True
         self.successful += 1
 
     def count_error(self, err):
-        """
-        On error - save it and mark backend as faulty
-        :param err: str
-        """
-        self.request_pending = False
-        self.healthy = False
         self.errors[err] += 1
 
-    @property
-    def was_success(self):
-        """
-        Backend communication was not success in two cases:
-        - backend returned error
-        - backend didn't respond at all
-        Looks like both should be triggered as fault
-        :return: bool
-        """
-        return self.healthy and not self.request_pending
+    # @property
+    # def was_success(self):
+    #     """
+    #     Backend communication was not success in two cases:
+    #     - backend returned error
+    #     - backend didn't respond at all
+    #     Looks like both should be triggered as fault
+    #     :return: bool
+    #     """
+    #     # if not self.healthy:
+    #     #     logging.debug("Last backend query fail - error logged, {0!s}".format(self.name))
+    #     # if self.request_pending and not args.unstrict:
+    #     #     logging.debug("Last backend query fail - pending request without log, {0!s}".format(self.name))
+    #
+    #     if args.unstrict:
+    #         return self.healthy
+    #     else:
+    #         return self.healthy and not self.request_pending
 
 
 class FrontendJobInfo(object):
@@ -291,24 +278,20 @@ class FrontendJobInfo(object):
         self.start_merge_time = 0
         self.start_send_result_time = 0
         self.finish_time = 0
-        self.backend_groups = set()
+        self.backends = collections.defaultdict(list)
+        self.success_groups = []
 
-    def add_backend_group(self, groupid):
-        self.backend_groups.add(groupid)
+    def add_backend(self, groupid, backend):
+        self.backends[groupid].append(backend)
+
+    def get_last_backend(self, groupid):
+        if self.backends[groupid]:
+            return self.backends[groupid][len(self.backends[groupid])-1]
+        else:
+            return None
 
 
 def run():
-    ap = argparse.ArgumentParser(description="Simple Log Analyzer")
-    ap.add_argument('--debug', action='store_true', help="Enable debug logging and output report to stdout")
-    ap.add_argument('--infile', type=str, default='input.txt', metavar='input.txt', help="Input file to analyze")
-    ap.add_argument('--outfile', type=str, default='output.txt', metavar='output.txt', help="File to write report")
-    args = ap.parse_args()
-
-    logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO,
-                        format='[%(asctime)s.%(msecs)03d] [%(levelname)s] %(message)s',
-                        datefmt='%Y:%m:%d %H:%M:%S')
-    logging.debug("Starting...")
-
     sc = StatsCollector()
 
     try:
@@ -327,4 +310,15 @@ def run():
         logging.exception('Error writing output file')
 
 if __name__ == '__main__':
+    ap = argparse.ArgumentParser(description="Simple Log Analyzer")
+    ap.add_argument('--debug', action='store_true', help="Enable debug logging and output report to stdout")
+    ap.add_argument('--infile', type=str, default='input.txt', metavar='input.txt', help="Input file to analyze")
+    ap.add_argument('--outfile', type=str, default='output.txt', metavar='output.txt', help="File to write report")
+    args = ap.parse_args()
+
+    logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO,
+                        format='[%(asctime)s.%(msecs)03d] [%(levelname)s] %(message)s',
+                        datefmt='%Y:%m:%d %H:%M:%S')
+    logging.debug("Starting...")
+
     run()
