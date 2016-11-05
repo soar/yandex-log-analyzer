@@ -6,7 +6,6 @@ import collections
 import heapq
 import io
 import logging
-import numpy
 
 #logentry_re = re.compile(r'(?P<time>\d+)\t(?P<reqid>\d+)\t(?P<type>\w+)(?:\t(?P<groupid>\d+)(?:\t(?P<desc>(.*)))?)?')
 #hostname_re = re.compile(r'//(?P<name>[\w\d\-.:]*)/')
@@ -171,8 +170,10 @@ class StatsCollector(object):
         """
         output = []
 
-        na = numpy.array(self.full_request_time)
-        output.append(u"95-й перцентиль времени работы: {0!s}\n".format(numpy.percentile(na, 95)))
+        #na = numpy.array(self.full_request_time)
+        #output.append(u"95-й перцентиль времени работы: {0!s}\n".format(numpy.percentile(na, 95)))
+
+        output.append(u"95-й перцентиль времени работы: {0!s}\n".format(sorted(self.full_request_time)[int(round(len(self.full_request_time) * 0.95)) - 1]))
 
         longest_answers = heapq.nlargest(10, self.send_answer_time, key=self.send_answer_time.__getitem__)
         output.append(u"Идентификаторы запросов с самой долгой фазой отправки результатов пользователю:")
