@@ -97,16 +97,10 @@ class StatsCollector(object):
             job.finish_time = int(logentry['time'])
 
             full_request_time = job.finish_time - job.start_time
-            if full_request_time <= 0:
-                logging.debug('Wrong request time found')
-            else:
-                self.full_request_time.append(full_request_time)
+            self.full_request_time.append(full_request_time)
 
             send_answer_time = job.finish_time - job.start_send_result_time
-            if send_answer_time <= 0:
-                logging.debug('Wrong send data time found')
-            else:
-                self.send_answer_time.update({logentry['reqid']: send_answer_time})
+            self.send_answer_time.update({logentry['reqid']: send_answer_time})
 
             for backend_group in job.backend_groups:
                 if not BackendInfo.get_last(backend_group).was_success:
