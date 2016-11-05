@@ -38,6 +38,11 @@ class StatsCollector(object):
         self.process_log_entry(logentry)
 
     def get_active_job(self, jobid):
+        """
+        Access to already logged frontend job
+        :param jobid: int
+        :return: FrontendJobInfo
+        """
         if jobid in self.active_jobs:
             return self.active_jobs[jobid]
         else:
@@ -45,6 +50,10 @@ class StatsCollector(object):
             return None
 
     def process_log_entry(self, logentry):
+        """
+        Choose right method to process log string by type
+        :param logentry: dict
+        """
         processor_name = 'process_' + logentry['type'].lower()
         if hasattr(self, processor_name):
             processor = getattr(self, 'process_' + logentry['type'].lower())
@@ -52,18 +61,37 @@ class StatsCollector(object):
 
     def process_startrequest(self, logentry):
         self.active_jobs.update({logentry['reqid']: FrontendJobInfo(logentry['reqid'], int(logentry['time']))})
+        """
+        Create record about new Frontend Job
+        :param logentry: dict
+        """
 
     def process_startmerge(self, logentry):
+        """
+        Log time of StartMerge event - looks like not needed
+        :param logentry: dict
+        """
         job = self.get_active_job(logentry['reqid'])
         if job:
             job.start_merge_time = int(logentry['time'])
 
     def process_startsendresult(self, logentry):
+        """
+        Log time of StartSendResult event
+        :param logentry: dict
+        """
         job = self.get_active_job(logentry['reqid'])
         if job:
             job.start_send_result_time = int(logentry['time'])
 
     def process_finishrequest(self, logentry):
+        """
+        On FinishRequest event we need to:
+         - Save request time and user response time
+         - Check all backend groups for health
+         - Remove job information
+        :param logentry: dict
+        """
         job = self.get_active_job(logentry['reqid'])
         if job:
             job.finish_time = int(logentry['time'])
@@ -100,6 +128,10 @@ class StatsCollector(object):
             job.add_backend_group(logentry['groupid'])
 
     def process_backendrequest(self, logentry):
+        """
+        Only count request
+        :param logentry: dict
+        """
         backend_info = BackendInfo.get_last(logentry['groupid'])
         if backend_info:
             backend_info.count_request()
@@ -107,6 +139,10 @@ class StatsCollector(object):
             logging.debug("There is no information about last accessed backend in group {0!s}".format(logentry['groupid']))
 
     def process_backendok(self, logentry):
+        """
+        Count success request - this marks backend healthy
+        :param logentry: dict
+        """
         backend_info = BackendInfo.get_last(logentry['groupid'])
         if backend_info:
             backend_info.count_success()
@@ -114,13 +150,22 @@ class StatsCollector(object):
             logging.debug("There is no information about last accessed backend in group {0!s}".format(logentry['groupid']))
 
     def process_backenderror(self, logentry):
+        """
+        Save error got from backend
+        :param logentry: dict
+        """
         backend_info = BackendInfo.get_last(logentry['groupid'])
         if backend_info:
             backend_info.count_error(logentry['desc'])
         else:
             logging.debug("There is no information about last accessed backend in group {0!s}".format(logentry['groupid']))
 
+    @property
     def results(self):
+        """
+        Output gathered statistics
+        :return: array
+        """
         output = []
 
         na = numpy.array(self.full_request_time)
@@ -156,6 +201,12 @@ class BackendInfo(object):
 
     @classmethod
     def get(cls, group, name):
+        """
+        Get or create new backend
+        :param group: int
+        :param name: str
+        :return: BackendInfo
+        """
         if group in cls.__backends and name in cls.__backends[group]:
             return cls.__backends[group][name]
         else:
@@ -163,13 +214,27 @@ class BackendInfo(object):
 
     @classmethod
     def get_last(cls, group):
+        """
+        Get last backend was accessed in group
+        :param group: int
+        :return: BackendInfo
+        """
         return cls.__last_access[group]
 
     @classmethod
     def get_all(cls):
+        """
+        Get all backends
+        :return: dict
+        """
         return cls.__backends
 
     def __init__(self, group, name):
+        """
+        When creating object - store reference to __backends for faster searching
+        :param group: int
+        :param name: str
+        """
         self.group = group
         self.name = name
 
@@ -184,6 +249,9 @@ class BackendInfo(object):
         BackendInfo.__backends[group].update({name: self})
 
     def count_connect(self):
+        """
+        On counting connection - reset health status
+        """
         self.connects += 1
         self.request_pending = True
         self.healthy = True
@@ -193,17 +261,31 @@ class BackendInfo(object):
         self.requests += 1
 
     def count_success(self):
+        """
+        On success communication - mark backend as healthy
+        """
         self.request_pending = False
         self.healthy = True
         self.successful += 1
 
     def count_error(self, err):
+        """
+        On error - save it and mark backend as faulty
+        :param err: str
+        """
         self.request_pending = False
         self.healthy = False
         self.errors[err] += 1
 
     @property
     def was_success(self):
+        """
+        Backend communication was not success in two cases:
+        - backend returned error
+        - backend didn't respond at all
+        Looks like both should be triggered as fault
+        :return: bool
+        """
         return self.healthy and not self.request_pending
 
 
@@ -220,7 +302,7 @@ class FrontendJobInfo(object):
     def add_backend_group(self, groupid):
         self.backend_groups.add(groupid)
 
-#@profile()
+
 def run():
     ap = argparse.ArgumentParser(description="Simple Log Analyzer")
     ap.add_argument('--debug', action='store_true', help="Enable debug logging and output report to stdout")
@@ -243,18 +325,12 @@ def run():
         logging.exception('Error reading input file')
         exit(1)
 
-    output = sc.results()
-
-    if args.debug:
-        for line in output:
-            logging.info(line)
-    else:
-        try:
-            with io.open(args.outfile, mode='w', encoding='utf-8') as outfile:
-                for line in output:
-                    outfile.write(line + "\n")
-        except IOError:
-            logging.exception('Error writing output file')
+    try:
+        with io.open(args.outfile, mode='w', encoding='utf-8') as outfile:
+            for line in sc.results:
+                outfile.write(line + "\n")
+    except IOError:
+        logging.exception('Error writing output file')
 
 if __name__ == '__main__':
     run()
