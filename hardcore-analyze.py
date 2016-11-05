@@ -7,10 +7,9 @@ import heapq
 import io
 import logging
 import numpy
-import re
 
-logentry_re = re.compile(r'(?P<time>\d+)\t(?P<reqid>\d+)\t(?P<type>\w+)(?:\t(?P<groupid>\d+)(?:\t(?P<desc>(.*)))?)?')
-hostname_re = re.compile(r'//(?P<name>[\w\d\-.:]*)/')
+#logentry_re = re.compile(r'(?P<time>\d+)\t(?P<reqid>\d+)\t(?P<type>\w+)(?:\t(?P<groupid>\d+)(?:\t(?P<desc>(.*)))?)?')
+#hostname_re = re.compile(r'//(?P<name>[\w\d\-.:]*)/')
 
 
 class StatsCollector(object):
@@ -22,14 +21,21 @@ class StatsCollector(object):
         self.active_jobs = {}
 
     def add_log_entry(self, line):
-        try:
-            logentry = logentry_re.match(line)
-            if logentry:
-                self.process_log_entry(logentry.groupdict())
-            else:
-                logging.debug('Log entry not recognized: {0!s}'.format(logentry))
-        except:
-            logging.exception('Error when trying to parse log entry: {0!s}'.format(line))
+        """
+        Parse string to a dictionary (regexp are too slow for this)
+        :param line: str
+        """
+        ls = line.strip().split('\t')
+        logentry = {
+            'time': int(ls[0]),
+            'reqid': int(ls[1]),
+            'type': ls[2]
+        }
+        if len(ls) > 3:
+            logentry['groupid'] = int(ls[3])
+        if len(ls) > 4:
+            logentry['desc'] = ls[4]
+        self.process_log_entry(logentry)
 
     def get_active_job(self, jobid):
         if jobid in self.active_jobs:
@@ -82,15 +88,16 @@ class StatsCollector(object):
             del self.active_jobs[logentry['reqid']]
 
     def process_backendconnect(self, logentry):
-        backend_log_info = hostname_re.search(logentry['desc'])
-        if backend_log_info:
-            BackendInfo.get(logentry['groupid'], backend_log_info.group('name')).count_connect()
+        """
+        Save backend name (host + port) extracted from event comment and count connection.
+         Also add backend group to current job relations
+        :param logentry: dict
+        """
+        BackendInfo.get(logentry['groupid'], logentry['desc'].split('/')[2]).count_connect()
 
-            job = self.get_active_job(logentry['reqid'])
-            if job:
-                job.add_backend_group(logentry['groupid'])
-        else:
-            logging.debug("BackendConnect event found, but hostname is not recognized")
+        job = self.get_active_job(logentry['reqid'])
+        if job:
+            job.add_backend_group(logentry['groupid'])
 
     def process_backendrequest(self, logentry):
         backend_info = BackendInfo.get_last(logentry['groupid'])
