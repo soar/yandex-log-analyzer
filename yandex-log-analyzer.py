@@ -310,6 +310,7 @@ def run():
     except IOError:
         logging.exception('Error writing output file')
 
+
 if __name__ == '__main__':
     ap = argparse.ArgumentParser(description="Simple Log Analyzer")
     ap.add_argument('--debug', action='store_true', help="Enable debug logging and output report to stdout")
